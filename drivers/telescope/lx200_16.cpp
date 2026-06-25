@@ -36,7 +36,7 @@ LX200_16::LX200_16() : LX200GPS()
 
 const char *LX200_16::getDefaultName()
 {
-    return (const char *)"LX200 16";
+    return "LX200 16";
 }
 
 bool LX200_16::initProperties()
@@ -62,6 +62,9 @@ bool LX200_16::initProperties()
     IUFillNumber(&HorizontalCoordsN[1], "AZ", "Az D:M:S", "%10.6m", 0.0, 360.0, 0.0, 0);
     IUFillNumberVector(&HorizontalCoordsNP, HorizontalCoordsN, 2, getDeviceName(), "HORIZONTAL_COORD",
                        "Horizontal Coord", MAIN_CONTROL_TAB, IP_RW, 0, IPS_IDLE);
+
+    MountTypeSP.reset();
+    MountTypeSP[MOUNT_ALTAZ].setState(ISS_ON);
 
     return true;
 }
@@ -208,6 +211,7 @@ bool LX200_16::ISNewSwitch(const char *dev, const char *name, ISState *states, c
             else
                 ret = seekHomeAndSet(PortFD);
 
+            INDI_UNUSED(ret);
             HomeSearchSP.s = IPS_BUSY;
             IDSetSwitch(&HomeSearchSP, index == 0 ? "Seek Home and Save" : "Seek Home and Set");
             return true;
@@ -226,6 +230,7 @@ bool LX200_16::ISNewSwitch(const char *dev, const char *name, ISState *states, c
             else
                 ret = turnFieldDeRotatorOff(PortFD);
 
+            INDI_UNUSED(ret);
             FieldDeRotatorSP.s = IPS_OK;
             IDSetSwitch(&FieldDeRotatorSP, index == 0 ? "Field deRotator is ON" : "Field deRotator is OFF");
             return true;
@@ -329,7 +334,7 @@ bool LX200_16::ReadScopeStatus()
             if (getLX200Az(PortFD, &currentAZ) < 0 || getLX200Alt(PortFD, &currentALT) < 0)
             {
                 HorizontalCoordsNP.s = IPS_ALERT;
-                IDSetNumber(&HorizontalCoordsNP, "Error geting Alt/Az.");
+                IDSetNumber(&HorizontalCoordsNP, "Error getting Alt/Az.");
                 return false;
             }
 

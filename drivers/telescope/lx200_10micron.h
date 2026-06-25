@@ -107,12 +107,14 @@ class LX200_10MICRON : public LX200Generic
         const char *getDefaultName() override;
         bool Handshake() override;
         bool initProperties() override;
+        void ISGetProperties(const char *dev) override;
         bool updateProperties() override;
         bool saveConfigItems(FILE *fp) override;
         bool ReadScopeStatus() override;
         bool Park() override;
         bool UnPark() override;
-        bool flip();
+        bool SetTrackEnabled(bool enabled) override;
+        bool Flip(double ra, double dec) override;
         bool getUnattendedFlipSetting();
         bool setUnattendedFlipSetting(bool setting);
         bool SyncConfigBehaviour(bool cmcfg);
@@ -128,7 +130,7 @@ class LX200_10MICRON : public LX200Generic
         // TODO move these things elsewhere
         int monthToNumber(const char *monthName);
         int setStandardProcedureWithoutRead(int fd, const char *data);
-        int setStandardProcedureAndExpect(int fd, const char *data, const char *expect);
+        int setStandardProcedureAndExpectChar(int fd, const char *data, const char *expect);
         int setStandardProcedureAndReturnResponse(int fd, const char *data, char *response, int max_response_length);
 
     protected:
@@ -175,10 +177,22 @@ class LX200_10MICRON : public LX200Generic
         INumber TLEfromDatabaseN[1];
         INumberVectorProperty TLEfromDatabaseNP;
 
+        // Wake on LAN
+        IText WoLMacT[1] {};
+        ITextVectorProperty WoLMacTP;
+        ISwitch WoLSendS[1];
+        ISwitchVectorProperty WoLSendSP;
+
+        // Shutdown
+        INDI::PropertySwitch MountShutdownSP {1};
 
     private:
         int fd = -1; // short notation for PortFD/sockfd
         bool getMountInfo();
+        bool flip();
+        bool sendWakeOnLanPacket();
+        bool m_ShutdownPending { false };
+        void TimerHit() override;
 
         int OldGstat = GSTAT_UNSET;
         struct _Ginfo

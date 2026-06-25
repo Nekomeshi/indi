@@ -3,7 +3,7 @@
     GM1000HPS GM2000QCI GM2000HPS GM3000HPS GM4000QCI GM4000HPS AZ2000
     Mount Command Protocol 2.14.11
 
-    Copyright (C) 2017-2020 Hans Lambermont
+    Copyright (C) 2017-2025 Hans Lambermont
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -32,10 +32,11 @@
 #include "lx200driver.h"
 
 #include <cstring>
+#include <string>
 #include <strings.h>
 #include <termios.h>
 #include <math.h>
-#include <libnova.h>
+#include <libnova/libnova.h>
 
 #define PRODUCT_TAB   "Product"
 #define ALIGNMENT_TAB "Alignment"
@@ -58,6 +59,9 @@
 #define TRAJECTORY_TIME "TRAJECTORY_TIME"
 #define SAT_TRACKING_STAT "SAT_TRACKING_STAT"
 #define UNATTENDED_FLIP "UNATTENDED_FLIP"
+#define WAKE_ON_LAN_MAC  "WAKE_ON_LAN_MAC"
+#define WAKE_ON_LAN_SEND "WAKE_ON_LAN_SEND"
+#define MOUNT_SHUTDOWN "MOUNT_SHUTDOWN"
 
 LX200_10MICRON::LX200_10MICRON() : LX200Generic()
 {
@@ -67,6 +71,7 @@ LX200_10MICRON::LX200_10MICRON() : LX200Generic()
         TELESCOPE_CAN_GOTO |
         TELESCOPE_CAN_SYNC |
         TELESCOPE_CAN_PARK |
+        TELESCOPE_CAN_FLIP |
         TELESCOPE_CAN_ABORT |
         TELESCOPE_HAS_TIME |
         TELESCOPE_HAS_LOCATION |
@@ -74,10 +79,11 @@ LX200_10MICRON::LX200_10MICRON() : LX200Generic()
         TELESCOPE_HAS_TRACK_MODE |
         TELESCOPE_CAN_CONTROL_TRACK |
         TELESCOPE_HAS_TRACK_RATE |
-        TELESCOPE_CAN_TRACK_SATELLITE
+        TELESCOPE_CAN_TRACK_SATELLITE,
+        4
     );
 
-    setVersion(1, 0);
+    setVersion(1, 3); // don't forget to update drivers.xml
 }
 
 // Called by INDI::DefaultDevice::ISGetProperties
@@ -182,20 +188,47 @@ bool LX200_10MICRON::initProperties()
         IUFillNumber(&TLEfromDatabaseN[0], "NUMBER", "#", "%.0f", 1, 999, 1, 1);
         IUFillNumberVector(&TLEfromDatabaseNP, TLEfromDatabaseN, 1, getDeviceName(),
                            "TLE_NUMBER", "Database TLE ", SATELLITE_TAB, IP_RW, 60, IPS_IDLE);
+
+        
+        IUFillText(&WoLMacT[0], "MAC", "MAC Address (XX:XX:XX:XX:XX:XX)", "");
+        IUFillTextVector(&WoLMacTP, WoLMacT, 1, getDeviceName(), WAKE_ON_LAN_MAC, "Wake on LAN", CONNECTION_TAB, IP_RW, 60, IPS_IDLE);
+        char wolMacBuf[128] = {};
+        if (IUGetConfigText(getDeviceName(), WoLMacTP.name, WoLMacT[0].name, wolMacBuf, sizeof(wolMacBuf)) == 0)
+            IUSaveText(&WoLMacT[0], wolMacBuf);
+
+        IUFillSwitch(&WoLSendS[0], "SEND", "Wake Mount", ISS_OFF);
+        IUFillSwitchVector(&WoLSendSP, WoLSendS, 1, getDeviceName(), WAKE_ON_LAN_SEND, "Wake on LAN", CONNECTION_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+
+        MountShutdownSP[0].fill("SHUTDOWN", "Shutdown Mount", ISS_OFF);
+        MountShutdownSP.fill(getDeviceName(), MOUNT_SHUTDOWN, "Shutdown", MAIN_CONTROL_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
     }
     return result;
+}
+
+void LX200_10MICRON::ISGetProperties(const char *dev)
+{
+    LX200Generic::ISGetProperties(dev);
+
+    defineProperty(&WoLMacTP);
+    defineProperty(&WoLSendSP);
 }
 
 bool LX200_10MICRON::saveConfigItems(FILE *fp)
 {
     INDI::Telescope::saveConfigItems(fp);
     IUSaveConfigSwitch(fp, &UnattendedFlipSP);
+    IUSaveConfigText(fp, &WoLMacTP);
     return true;
 }
 
 // Called by INDI::Telescope when connected state changes to add/remove properties
 bool LX200_10MICRON::updateProperties()
 {
+    // Define MountShutdownSP before the parent call so it appears immediately on connect,
+    // not after the slow getBasicData() mount queries inside LX200Generic::updateProperties().
+    if (isConnected())
+        defineProperty(MountShutdownSP);
+
     bool result = LX200Generic::updateProperties();
 
     if (isConnected())
@@ -242,6 +275,7 @@ bool LX200_10MICRON::updateProperties()
     }
     else
     {
+        deleteProperty(MountShutdownSP);
         deleteProperty(UnattendedFlipSP.name);
         deleteProperty(ProductTP.name);
         deleteProperty(RefractionModelTemperatureNP.name);
@@ -539,10 +573,15 @@ bool LX200_10MICRON::Park()
     LOG_INFO("Parking.");
     if (setStandardProcedureWithoutRead(fd, "#:KA#") < 0)
     {
+        ParkSP.setState(IPS_ALERT);
+        LOG_ERROR("Park command failed.");
+        ParkSP.apply();
         return false;
     }
 
+    ParkSP.setState(IPS_BUSY);
     TrackState = SCOPE_PARKING;
+    ParkSP.apply();
     // postpone SetParked(true) for ReadScopeStatus so that we know it is actually correct
     return true;
 }
@@ -555,11 +594,45 @@ bool LX200_10MICRON::UnPark()
     LOG_INFO("Unparking.");
     if (setStandardProcedureWithoutRead(fd, "#:PO#") < 0)
     {
+        ParkSP.setState(IPS_ALERT);
+        LOG_ERROR("Unpark command failed.");
+        ParkSP.apply();
         return false;
     }
 
+    ParkSP.setState(IPS_OK);
     TrackState = SCOPE_IDLE;
     SetParked(false);
+    ParkSP.apply();
+    return true;
+}
+
+bool LX200_10MICRON::SetTrackEnabled(bool enabled)
+{
+    // :AL#
+    // Stops tracking.
+    // Returns: nothing
+    // :AP#
+    // Starts tracking.
+    // Returns: nothing
+    if (enabled)
+    {
+        LOG_INFO("Start tracking.");
+        if (setStandardProcedureWithoutRead(fd, "#:AP#") < 0)
+        {
+            LOG_ERROR("Start tracking command failed");
+            return false;
+        }
+    }
+    else
+    {
+        LOG_INFO("Stop tracking.");
+        if (setStandardProcedureWithoutRead(fd, "#:AL#") < 0)
+        {
+            LOG_ERROR("Stop tracking command failed");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -611,6 +684,13 @@ bool LX200_10MICRON::setUnattendedFlipSetting(bool setting)
     return false;
 }
 
+bool LX200_10MICRON::Flip(double ra, double dec)
+{
+    INDI_UNUSED(ra);
+    INDI_UNUSED(dec);
+    return flip();
+}
+
 bool LX200_10MICRON::flip()
 {
     // #:FLIP#
@@ -624,7 +704,7 @@ bool LX200_10MICRON::flip()
     DEBUGFDEVICE(getDefaultName(), DBG_SCOPE, "<%s>", __FUNCTION__);
     char data[64];
     snprintf(data, sizeof(data), "#:FLIP#");
-    return 0 == setStandardProcedureAndExpect(fd, data, "1");
+    return 0 == setStandardProcedureAndExpectChar(fd, data, "1");
 }
 
 bool LX200_10MICRON::SyncConfigBehaviour(bool cmcfg)
@@ -632,7 +712,7 @@ bool LX200_10MICRON::SyncConfigBehaviour(bool cmcfg)
     // #:CMCFGn#
     // Configures the behaviour of the :CM# and :CMR# commands depending on the value
     // of n. If n=0, :the commands :CM# and :CMR# work in the default mode, i.e. they
-    // synchronize the position ot the mount with the coordinates of the currently selected
+    // synchronize the position to the mount with the coordinates of the currently selected
     // target by correcting the axis offset values. If n=1, the commands :CM# and :CMR#
     // work by using the synchronization position as an additional alignment star for refining
     // the alignment model.
@@ -659,7 +739,7 @@ bool LX200_10MICRON::setLocalDate(uint8_t days, uint8_t months, uint16_t years)
     DEBUGFDEVICE(getDefaultName(), DBG_SCOPE, "<%s>", __FUNCTION__);
     char data[64];
     snprintf(data, sizeof(data), ":SC%04d-%02d-%02d#", years, months, days);
-    return 0 == setStandardProcedureAndExpect(fd, data, "1");
+    return 0 == setStandardProcedureAndExpectChar(fd, data, "1");
 }
 
 bool LX200_10MICRON::SetTLEtoFollow(const char *tle)
@@ -770,7 +850,7 @@ bool LX200_10MICRON::SetTLEfromDatabase(int tleN)
 bool LX200_10MICRON::CalculateSatTrajectory(std::string start_pass_isodatetime, std::string end_pass_isodatetime)
 {
     // #:TLEPJD,min#
-    // Precalulates the first transit of the satellite with the currently loaded orbital elements,
+    // Precalculates the first transit of the satellite with the currently loaded orbital elements,
     // starting from Julian Date JD and for a period of min minutes, where min is from 1 to 1440.
     // Two-line elements have to be loaded with the :TLEL command.
     // Returns:
@@ -1082,8 +1162,8 @@ bool LX200_10MICRON::ISNewNumber(const char *dev, const char *name, double value
                 return false;
             }
             TLEfromDatabaseNP.s = IPS_OK;
-            TLEtoTrackTP.s = IPS_IDLE;
-            IDSetText(&TLEtoTrackTP, nullptr);
+            TLEtoTrackTP.setState(IPS_IDLE);
+            TLEtoTrackTP.apply();
             IDSetNumber(&TLEfromDatabaseNP, nullptr);
             LOGF_INFO("Selected TLE nr %.0f from database", TLEfromDatabaseN[0].value);
 
@@ -1117,7 +1197,7 @@ bool LX200_10MICRON::ISNewSwitch(const char *dev, const char *name, ISState *sta
                     // Returns:
                     // the string "V#" (this is always successful).
                     // Available from version 2.8.15.
-                    if (0 != setStandardProcedureAndExpect(fd, "#:newalig#", "V"))
+                    if (0 != setStandardProcedureAndExpectChar(fd, "#:newalig#", "V"))
                     {
                         LOG_ERROR("New alignment start error");
                         AlignmentStateSP.s = IPS_ALERT;
@@ -1137,7 +1217,7 @@ bool LX200_10MICRON::ISNewSwitch(const char *dev, const char *name, ISState *sta
                     // the string "E#" if the alignment couldn't be computed successfully with the current
                     // alignment specification. In this case the previous alignment is retained.
                     // Available from version 2.8.15.
-                    if (0 != setStandardProcedureAndExpect(fd, "#:endalig#", "V"))
+                    if (0 != setStandardProcedureAndExpectChar(fd, "#:endalig#", "V"))
                     {
                         LOG_ERROR("New alignment end error");
                         AlignmentStateSP.s = IPS_ALERT;
@@ -1153,7 +1233,7 @@ bool LX200_10MICRON::ISNewSwitch(const char *dev, const char *name, ISState *sta
                     // Deletes the current alignment model and stars.
                     // Returns: an empty string terminated by '#'.
                     // Available from version 2.8.15.
-                    if (0 != setStandardProcedureAndExpect(fd, "#:delalig#", "#"))
+                    if (0 != setStandardProcedureAndExpectChar(fd, "#:delalig#", "#"))
                     {
                         LOG_ERROR("Delete current alignment error");
                         AlignmentStateSP.s = IPS_ALERT;
@@ -1175,41 +1255,41 @@ bool LX200_10MICRON::ISNewSwitch(const char *dev, const char *name, ISState *sta
             IDSetSwitch(&AlignmentStateSP, nullptr);
             return true;
         }
-        if (strcmp(TrackSatSP.name, name) == 0)
+        if (TrackSatSP.isNameMatch(name))
         {
 
-            IUUpdateSwitch(&TrackSatSP, states, names, n);
-            int index    = IUFindOnSwitchIndex(&TrackSatSP);
+            TrackSatSP.update(states, names, n);
+            int index    = TrackSatSP.findOnSwitchIndex();
 
             switch (index)
             {
                 case SAT_TRACK:
                     if ( 0 != TrackSat() )
                     {
-                        TrackSatSP.s = IPS_ALERT;
-                        IDSetSwitch(&TrackSatSP, nullptr);
+                        TrackSatSP.setState(IPS_ALERT);
+                        TrackSatSP.apply();
                         LOG_ERROR("Tracking failed");
                         return false;
                     }
-                    TrackSatSP.s = IPS_OK;
-                    IDSetSwitch(&TrackSatSP, nullptr);
+                    TrackSatSP.setState(IPS_OK);
+                    TrackSatSP.apply();
                     LOG_INFO("Tracking satellite");
                     return true;
                 case SAT_HALT:
                     if ( !Abort() )
                     {
-                        TrackSatSP.s = IPS_ALERT;
-                        IDSetSwitch(&TrackSatSP, nullptr);
+                        TrackSatSP.setState(IPS_ALERT);
+                        TrackSatSP.apply();
                         LOG_ERROR("Halt failed");
                         return false;
                     }
-                    TrackSatSP.s = IPS_OK;
-                    IDSetSwitch(&TrackSatSP, nullptr);
+                    TrackSatSP.setState(IPS_OK);
+                    TrackSatSP.apply();
                     LOG_INFO("Halt tracking");
                     return true;
                 default:
-                    TrackSatSP.s = IPS_ALERT;
-                    IDSetSwitch(&TrackSatSP, "Unknown tracking modus %d", index);
+                    TrackSatSP.setState(IPS_ALERT);
+                    LOGF_ERROR("Unknown tracking modus %d", index);
                     return false;
             }
         }
@@ -1249,6 +1329,48 @@ bool LX200_10MICRON::ISNewSwitch(const char *dev, const char *name, ISState *sta
             IDSetSwitch(&UnattendedFlipSP, nullptr);
             return true;
         }
+        if (strcmp(WoLSendSP.name, name) == 0)
+        {
+            IUResetSwitch(&WoLSendSP);
+            if (sendWakeOnLanPacket())
+            {
+                WoLSendSP.s = IPS_OK;
+                LOG_INFO("Wake on LAN packet sent successfully.");
+            }
+            else
+            {
+                WoLSendSP.s = IPS_ALERT;
+                LOG_ERROR("Failed to send Wake on LAN packet.");
+            }
+            IDSetSwitch(&WoLSendSP, nullptr);
+            return true;
+        }
+        if (MountShutdownSP.isNameMatch(name))
+        {
+            MountShutdownSP.reset();
+            if (!isParked())
+            {
+                MountShutdownSP.setState(IPS_ALERT);
+                LOG_WARN("Mount must be parked before shutdown.");
+                MountShutdownSP.apply();
+                return false;
+            }
+            // :shutdown# — returns '1' on success, '0' on failure; ~20 s until power-off
+            if (0 != setStandardProcedureAndExpectChar(fd, ":shutdown#", "1"))
+            {
+                MountShutdownSP.setState(IPS_ALERT);
+                LOG_ERROR("Mount shutdown command failed.");
+                MountShutdownSP.apply();
+                return false;
+            }
+            MountShutdownSP.setState(IPS_OK);
+            LOG_INFO("Mount shutdown initiated. Disconnecting before mount powers off.");
+            MountShutdownSP.apply();
+            // Defer disconnect so ISNewSwitch returns cleanly before we tear down the property list
+            m_ShutdownPending = true;
+            SetTimer(100);
+            return true;
+        }
     }
 
     return LX200Generic::ISNewSwitch(dev, name, states, names, n);
@@ -1269,21 +1391,21 @@ bool LX200_10MICRON::ISNewText(const char *dev, const char *name, char *texts[],
         if (strcmp(name, "SAT_TLE_TEXT") == 0)
         {
 
-            IUUpdateText(&TLEtoTrackTP, texts, names, n);
-            if (0 == SetTLEtoFollow(TLEtoTrackT[0].text))
+            TLEtoTrackTP.update(texts, names, n);
+            if (0 == SetTLEtoFollow(TLEtoTrackTP[0].getText()))
             {
-                TLEtoTrackTP.s = IPS_OK;
+                TLEtoTrackTP.setState(IPS_OK);
                 TLEfromDatabaseNP.s = IPS_IDLE;
-                IDSetText(&TLEtoTrackTP, nullptr);
+                TLEtoTrackTP.apply();
                 IDSetNumber(&TLEfromDatabaseNP, nullptr);
-                LOGF_INFO("Selected TLE %s", TLEtoTrackT[0].text);
+                LOGF_INFO("Selected TLE %s", TLEtoTrackTP[0].getText());
                 return true;
             }
             else
             {
-                TLEtoTrackTP.s = IPS_ALERT;
+                TLEtoTrackTP.setState(IPS_ALERT);
                 TLEfromDatabaseNP.s = IPS_IDLE;
-                IDSetText(&TLEtoTrackTP, nullptr);
+                TLEtoTrackTP.apply();
                 IDSetNumber(&TLEfromDatabaseNP, nullptr);
                 LOG_ERROR("TLE was not correctly uploaded");
                 return false;
@@ -1291,21 +1413,29 @@ bool LX200_10MICRON::ISNewText(const char *dev, const char *name, char *texts[],
         }
         if (strcmp(name, "SAT_PASS_WINDOW") == 0)
         {
-            IUUpdateText(&SatPassWindowTP, texts, names, n);
-            if (0 == CalculateSatTrajectory(SatPassWindowT[SAT_PASS_WINDOW_START].text, SatPassWindowT[SAT_PASS_WINDOW_END].text))
+            SatPassWindowTP.update(texts, names, n);
+            if (0 == CalculateSatTrajectory(SatPassWindowTP[SAT_PASS_WINDOW_START].getText(), SatPassWindowTP[SAT_PASS_WINDOW_END].getText()))
             {
-                SatPassWindowTP.s = IPS_OK;
-                IDSetText(&SatPassWindowTP, nullptr);
+                SatPassWindowTP.setState(IPS_OK);
+                SatPassWindowTP.apply();
                 LOG_INFO("Trajectory set");
                 return true;
             }
             else
             {
-                SatPassWindowTP.s = IPS_ALERT;
-                IDSetText(&SatPassWindowTP, nullptr);
+                SatPassWindowTP.setState(IPS_ALERT);
+                SatPassWindowTP.apply();
                 LOG_ERROR("Trajectory could not be calculated");
                 return false;
             }
+        }
+        if (strcmp(name, WAKE_ON_LAN_MAC) == 0)
+        {
+            IUUpdateText(&WoLMacTP, texts, names, n);
+            WoLMacTP.s = IPS_OK;
+            IDSetText(&WoLMacTP, nullptr);
+            LOGF_INFO("WoL MAC address set to %s", WoLMacT[0].text);
+            return true;
         }
     }
     return LX200Generic::ISNewText(dev, name, texts, names, n);
@@ -1339,32 +1469,37 @@ int LX200_10MICRON::setStandardProcedureWithoutRead(int fd, const char *data)
     int nbytes_write = 0;
 
     DEBUGFDEVICE(getDefaultName(), DBG_SCOPE, "CMD <%s>", data);
+    tcflush(fd, TCIFLUSH);
     if ((error_type = tty_write_string(fd, data, &nbytes_write)) != TTY_OK)
     {
+        LOGF_ERROR("CMD <%s> write ERROR %d", data, error_type);
         return error_type;
     }
     tcflush(fd, TCIFLUSH);
     return 0;
 }
-int LX200_10MICRON::setStandardProcedureAndExpect(int fd, const char *data, const char *expect)
+
+int LX200_10MICRON::setStandardProcedureAndExpectChar(int fd, const char *data, const char *expect)
 {
     char bool_return[2];
     int error_type;
     int nbytes_write = 0, nbytes_read = 0;
 
     DEBUGFDEVICE(getDefaultName(), DBG_SCOPE, "CMD <%s>", data);
-
     tcflush(fd, TCIFLUSH);
-
     if ((error_type = tty_write_string(fd, data, &nbytes_write)) != TTY_OK)
+    {
+        LOGF_ERROR("CMD <%s> write ERROR %d", data, error_type);
         return error_type;
-
+    }
     error_type = tty_read(fd, bool_return, 1, LX200_TIMEOUT, &nbytes_read);
-
     tcflush(fd, TCIFLUSH);
 
     if (nbytes_read < 1)
+    {
+        LOGF_ERROR("CMD <%s> read ERROR %d", data, error_type);
         return error_type;
+    }
 
     if (bool_return[0] != expect[0])
     {
@@ -1383,18 +1518,59 @@ int LX200_10MICRON::setStandardProcedureAndReturnResponse(int fd, const char *da
     int nbytes_write = 0, nbytes_read = 0;
 
     DEBUGFDEVICE(getDefaultName(), DBG_SCOPE, "CMD <%s>", data);
-
     tcflush(fd, TCIFLUSH);
-
     if ((error_type = tty_write_string(fd, data, &nbytes_write)) != TTY_OK)
+    {
+        LOGF_ERROR("CMD <%s> write ERROR %d", data, error_type);
         return error_type;
-
+    }
     error_type = tty_read(fd, response, max_response_length, LX200_TIMEOUT, &nbytes_read);
-
     tcflush(fd, TCIFLUSH);
 
     if (nbytes_read < 1)
+    {
+        LOGF_ERROR("CMD <%s> read ERROR %d", data, error_type);
         return error_type;
+    }
 
     return 0;
+}
+
+void LX200_10MICRON::TimerHit()
+{
+    if (m_ShutdownPending)
+    {
+        m_ShutdownPending = false;
+        // Standard INDI disconnect sequence — same as clicking Disconnect in the UI
+        Disconnect();
+        setConnected(false, IPS_IDLE);
+        updateProperties();
+        return; // do not reschedule polling
+    }
+    LX200Generic::TimerHit();
+}
+
+bool LX200_10MICRON::sendWakeOnLanPacket()
+{
+    const char *macStr = WoLMacT[0].text;
+    if (!macStr || macStr[0] == '\0')
+    {
+        LOG_ERROR("WoL: MAC address not configured.");
+        return false;
+    }
+
+    std::string cmd = "wakeonlan " + std::string(macStr);
+    int ret = system(cmd.c_str());
+    if (ret == 0)
+    {
+        LOGF_INFO("WoL: magic packet sent to %s", macStr);
+        return true;
+    }
+    if (ret == 127)
+    {
+        LOG_ERROR("WoL: wakeonlan tool not found. Please install it on your system.");
+        return false;
+    }
+    LOG_ERROR("WoL: wakeonlan failed to send the packet.");
+    return false;
 }

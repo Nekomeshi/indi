@@ -24,8 +24,8 @@
 extern "C" {
 #endif
 
-#ifndef DLL_EXPORT
-#define DLL_EXPORT extern
+#ifdef _WIN32
+#define _TCHAR_DEFINED
 #endif
 
 #include <fitsio.h>
@@ -183,37 +183,37 @@ typedef struct
 #define EXTFITS_MEASURE_UNIT_MILLIBAR "millibar"
 
 ///Set to 'FLUX' or 'DATA' for matrix buffers
-#define EXTFITS_KEYWORD_TTYPE(n) ((dsp_fits_keyword){"TTYPE" itostr(n), "8A", "", "", "Set to 'FLUX'", (char*[]){"FLUX", "DATA", ""}})
+#define EXTFITS_KEYWORD_TTYPE(n) (dsp_fits_keyword){"TTYPE" itostr(n), "8A", "", "", "Set to 'FLUX'", (char*[]){"FLUX", "DATA", ""}}
 ///shall have the value 'K', 'JY' or 'UNCALIB'
-#define EXTFITS_KEYWORD_TUNIT(n) ((dsp_fits_keyword){"TUNIT" itostr(n), "8A", "", "", "Shall have the value 'JY' or 'UNCALIB'", (char*[]){""}})
+#define EXTFITS_KEYWORD_TUNIT(n) (dsp_fits_keyword){"TUNIT" itostr(n), "8A", "", "", "Shall have the value 'JY' or 'UNCALIB'", (char*[]){""}}
 ///Size in pixels of data buffer
-#define EXTFITS_KEYWORD_TDIM(n) ((dsp_fits_keyword){"TDIM" itostr(n), "8A", "", "", "Size in pixels of data buffer", (char*[]){""}})
+#define EXTFITS_KEYWORD_TDIM(n) (dsp_fits_keyword){"TDIM" itostr(n), "8A", "", "", "Size in pixels of data buffer", (char*[]){""}}
 ///shall have the format of the column
-#define EXTFITS_KEYWORD_TFORM(n) ((dsp_fits_keyword){"TFORM" itostr(n), "8A", "", "", "Shall be a character string", (char*[]){""}})
+#define EXTFITS_KEYWORD_TFORM(n) (dsp_fits_keyword){"TFORM" itostr(n), "8A", "", "", "Shall be a character string", (char*[]){""}}
 
 ///Name of regular axis m = 1 to M
-#define EXTFITS_KEYWORD_CTYPE(m) ((dsp_fits_keyword){"CTYPE" itostr(m), EXTFITS_ELEMENT_STRING.typestr, "", "", "Name of regular axis m = 1 to M", (char*[]){""}})
+#define EXTFITS_KEYWORD_CTYPE(m) (dsp_fits_keyword){"CTYPE" itostr(m), EXTFITS_ELEMENT_STRING.typestr, "", "", "Name of regular axis m = 1 to M", (char*[]){""}}
 ///Coordinate increment on axis m = 1 to M
-#define EXTFITS_KEYWORD_CDELT(m) ((dsp_fits_keyword){"CDELT" itostr(m), EXTFITS_ELEMENT_FLOAT.typestr, "", "", "Coordinate increment on axis m = 1 to M", (char*[]){""}})
+#define EXTFITS_KEYWORD_CDELT(m) (dsp_fits_keyword){"CDELT" itostr(m), EXTFITS_ELEMENT_FLOAT.typestr, "", "", "Coordinate increment on axis m = 1 to M", (char*[]){""}}
 ///Reference pixel on axis m = 1 to M
-#define EXTFITS_KEYWORD_CRPIX(m) ((dsp_fits_keyword){"CRPIX" itostr(m), EXTFITS_ELEMENT_FLOAT.typestr, "", "", "Reference pixel on axis m = 1 to M", (char*[]){""}})
+#define EXTFITS_KEYWORD_CRPIX(m) (dsp_fits_keyword){"CRPIX" itostr(m), EXTFITS_ELEMENT_FLOAT.typestr, "", "", "Reference pixel on axis m = 1 to M", (char*[]){""}}
 ///Coordinate value at reference pixel on axis m = 1 to M
-#define EXTFITS_KEYWORD_CRVAL(m) ((dsp_fits_keyword){"CRVAL" itostr(m), EXTFITS_ELEMENT_FLOAT.typestr, "", "", "Coordinate value at reference pixel on axis m = 1 to M", (char*[]){""}})
+#define EXTFITS_KEYWORD_CRVAL(m) (dsp_fits_keyword){"CRVAL" itostr(m), EXTFITS_ELEMENT_FLOAT.typestr, "", "", "Coordinate value at reference pixel on axis m = 1 to M", (char*[]){""}}
 
 ///NMATRIX shall be present with the value 1
-#define EXTFITS_KEYWORD_NMATRIX ((dsp_fits_keyword){"NMATRIX", EXTFITS_ELEMENT_SHORT.typestr, "", "1", "NMATRIX shall be present with the value 1", (char*[]){"1", ""}})
+#define EXTFITS_KEYWORD_NMATRIX (dsp_fits_keyword){"NMATRIX", EXTFITS_ELEMENT_SHORT.typestr, "", "1", "NMATRIX shall be present with the value 1", (char*[]){"1", ""}}
 ///Set to 'T' — column n contains the visibility matrix
-#define EXTFITS_KEYWORD_TMATX(n) ((dsp_fits_matrix){"TMATX" itostr(n), "8A", "T", "Set to 'T'", {EXTFITS_KEYWORD_TTYPE(n), EXTFITS_KEYWORD_TFORM(n), EXTFITS_KEYWORD_TUNIT(n), EXTFITS_KEYWORD_TDIM(n)}})
+#define EXTFITS_KEYWORD_TMATX(n) (dsp_fits_matrix){"TMATX" itostr(n), "8A", "T", "Set to 'T'", {EXTFITS_KEYWORD_TTYPE(n), EXTFITS_KEYWORD_TFORM(n), EXTFITS_KEYWORD_TUNIT(n), EXTFITS_KEYWORD_TDIM(n)}}
 ///M = number axes in regular matrix, Number pixels on axis m = 1 to M
-#define EXTFITS_KEYWORD_MAXIS(m) ((dsp_fits_axis){"MAXIS" itostr(m), EXTFITS_ELEMENT_SHORT.typestr, "", "", "M = number axes in regular matrix, Number pixels on axis m = 1 to M", {EXTFITS_KEYWORD_CTYPE(m), EXTFITS_KEYWORD_CDELT(m), EXTFITS_KEYWORD_CRPIX(m), EXTFITS_KEYWORD_CRVAL(m)}})
+#define EXTFITS_KEYWORD_MAXIS(m) (dsp_fits_axis){"MAXIS" itostr(m), EXTFITS_ELEMENT_SHORT.typestr, "", "", "M = number axes in regular matrix, Number pixels on axis m = 1 to M", {EXTFITS_KEYWORD_CTYPE(m), EXTFITS_KEYWORD_CDELT(m), EXTFITS_KEYWORD_CRPIX(m), EXTFITS_KEYWORD_CRVAL(m)}}
 
 ///Target right ascension coordinate
-#define EXTFITS_KEYWORD_OBJCTRA ((dsp_fits_column){"OBJCTRA", EXTFITS_ELEMENT_STRING.typestr, EXTFITS_MEASURE_UNIT_DEGREE, "", "Target right ascension coordinate", (char*[]){""}})
+#define EXTFITS_KEYWORD_OBJCTRA (dsp_fits_column){"OBJCTRA", EXTFITS_ELEMENT_STRING.typestr, EXTFITS_MEASURE_UNIT_DEGREE, "", "Target right ascension coordinate", (char*[]){""}}
 ///Target declination coordinate
-#define EXTFITS_KEYWORD_OBJCTDEC ((dsp_fits_column){"OBJCTDEC", EXTFITS_ELEMENT_STRING.typestr, EXTFITS_MEASURE_UNIT_DEGREE, "", "Target declination coordinate", (char*[]){""}})
+#define EXTFITS_KEYWORD_OBJCTDEC (dsp_fits_column){"OBJCTDEC", EXTFITS_ELEMENT_STRING.typestr, EXTFITS_MEASURE_UNIT_DEGREE, "", "Target declination coordinate", (char*[]){""}}
 
-#define FITS_KEYWORD_EXTEND ((dsp_fits_keyword){"EXTEND", "A", "", "T", "", (char*[]){""}})
-#define FITS_KEYWORD_EXTNAME ((dsp_fits_keyword){"EXTNAME", "", "", "", "", (char*[]){""}})
+#define FITS_KEYWORD_EXTEND (dsp_fits_keyword){"EXTEND", "A", "", "T", "", (char*[]){""}}
+#define FITS_KEYWORD_EXTNAME (dsp_fits_keyword){"EXTNAME", "", "", "", "", (char*[]){""}}
 
 /**
 * \brief Create or update a new fits header key
@@ -224,7 +224,7 @@ typedef struct
 * \param comment The keyword or assigned value description or explanation
 * \param status This variable will be updated with the status of the update operation
 */
-void dsp_fits_update_fits_key(fitsfile *fptr, int type, char* name, void *value, char* comment, int *status);
+DLL_EXPORT void dsp_fits_update_fits_key(fitsfile *fptr, int type, char* name, void *value, char* comment, int *status);
 
 /**
 * \brief Convert an RGB color dsp_t array into a dsp_stream_p array each element containing the single components
@@ -233,7 +233,7 @@ void dsp_fits_update_fits_key(fitsfile *fptr, int type, char* name, void *value,
 * \return The number of rows incremented by the allocated ones
 * \sa dsp_fits_create_fits
 */
-long dsp_fits_alloc_fits_rows(fitsfile *fptr, unsigned long num_rows);
+DLL_EXPORT long dsp_fits_alloc_fits_rows(fitsfile *fptr, unsigned long num_rows);
 
 /**
 * \brief Fill a column at the given row position with the valued buffer
@@ -243,10 +243,10 @@ long dsp_fits_alloc_fits_rows(fitsfile *fptr, unsigned long num_rows);
 * \param typecode The element type size
 * \param num_elements The total field size in elements, this should take into account the width and repeat multipliers
 * \param rown The row number where the field is located
-* \return non-zero if any error occured
+* \return non-zero if any error occurred
 * \sa dsp_fits_create_fits
 */
-int dsp_fits_fill_fits_col(fitsfile *fptr, char* name, unsigned char *buf, int typecode, long num_elements,
+DLL_EXPORT int dsp_fits_fill_fits_col(fitsfile *fptr, char* name, unsigned char *buf, int typecode, long num_elements,
                            unsigned long rown);
 
 /**
@@ -254,23 +254,23 @@ int dsp_fits_fill_fits_col(fitsfile *fptr, char* name, unsigned char *buf, int t
 * \param fptr The fits file pointer created by dsp_fits_create_fits
 * \param name The name of the column
 * \param format This field should indicate the element size, width of each element and repetition eventually
-* \return non-zero if any error occured
+* \return non-zero if any error occurred
 */
-int dsp_fits_append_fits_col(fitsfile *fptr, char* name, char* format);
+DLL_EXPORT int dsp_fits_append_fits_col(fitsfile *fptr, char* name, char* format);
 
 /**
 * \brief Delete a column from the binary table
 * \param fptr The fits file pointer created by dsp_fits_create_fits
 * \param name The name of the column
 */
-void dsp_fits_delete_fits_col(fitsfile *fptr, char* name);
+DLL_EXPORT void dsp_fits_delete_fits_col(fitsfile *fptr, char* name);
 
 /**
 * \brief Obtain the single element size in bytes
 * \param typecode The typecode of each single element
 * \return the size of the single element
 */
-size_t dsp_fits_get_element_size(int typecode);
+DLL_EXPORT size_t dsp_fits_get_element_size(int typecode);
 
 /**
 * \brief Decode a typecode format string
@@ -278,9 +278,9 @@ size_t dsp_fits_get_element_size(int typecode);
 * \param typecode This function will return the typecode to this variable
 * \param width This function will return the width to this variable
 * \param repeat This function will return the repeatition count to this variable
-* \return non-zero if any error occured
+* \return non-zero if any error occurred
 */
-int dsp_fits_read_typecode(char* typestr, int *typecode, long *width, long *repeat);
+DLL_EXPORT int dsp_fits_read_typecode(char* typestr, int *typecode, long *width, long *repeat);
 
 /**
 * \brief Obtain the value of the specified field
@@ -288,9 +288,9 @@ int dsp_fits_read_typecode(char* typestr, int *typecode, long *width, long *repe
 * \param column The column name of the selected field
 * \param rown The row position of the field
 * \param retval A preallocated buffer where the field value will be stored into
-* \return non-zero if any error occured
+* \return non-zero if any error occurred
 */
-int dsp_fits_get_value(fitsfile *fptr, char* column, long rown, void **retval);
+DLL_EXPORT int dsp_fits_get_value(fitsfile *fptr, char* column, long rown, void **retval);
 
 /**
 * \brief Check if the value of the specified field corresponds to a subset of values
@@ -300,7 +300,7 @@ int dsp_fits_get_value(fitsfile *fptr, char* column, long rown, void **retval);
 * \param rown The row position of the field
 * \return zero if any of the values was matched
 */
-int dsp_fits_check_column(fitsfile *fptr, char* column, char **expected, long rown);
+DLL_EXPORT int dsp_fits_check_column(fitsfile *fptr, char* column, char **expected, long rown);
 
 /**
 * \brief Create an open fits file pointer to be updated later
@@ -308,7 +308,7 @@ int dsp_fits_check_column(fitsfile *fptr, char* column, char **expected, long ro
 * \param buf This buffer will contain the fits memfile
 * \return fitsfile the fits file pointer
 */
-fitsfile* dsp_fits_create_fits(size_t *size, void **buf);
+DLL_EXPORT fitsfile* dsp_fits_create_fits(size_t *size, void **buf);
 
 /**
 * \brief Add a binary table extension into a fits file
@@ -316,16 +316,16 @@ fitsfile* dsp_fits_create_fits(size_t *size, void **buf);
 * \param columns An array of dsp_fits_column structs
 * \param ncols The dsp_fits_column array length
 * \param tablename The extension table name
-* \return non-zero if any error occured
+* \return non-zero if any error occurred
 */
-int dsp_fits_add_table(fitsfile* fptr, dsp_fits_column *columns, int ncols,  const char* tablename);
+DLL_EXPORT int dsp_fits_add_table(fitsfile* fptr, dsp_fits_column *columns, int ncols,  const char* tablename);
 
 /**
 * \brief Close a fits file pointer
 * \param fptr The fits file pointer created by dsp_fits_create_fits
-* \return non-zero if any error occured
+* \return non-zero if any error occurred
 */
-int dsp_fits_close_fits(fitsfile *fptr);
+DLL_EXPORT int dsp_fits_close_fits(fitsfile *fptr);
 /**\}*/
 
 #ifdef __cplusplus

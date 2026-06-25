@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <signal.h>
 #include <dirent.h>
 #include <errno.h>
 #include <unistd.h>
@@ -70,7 +71,7 @@ void ProcessController::start(const std::string & path, const std::vector<std::s
 
     int argCount = 0;
     argCount = args.size();
-    const char * fullArgs[argCount + 2];
+    std::vector<const char *> fullArgs(argCount + 2);
     fullArgs[0] = path.c_str();
     for(int i = 0; i < argCount ; i++) {
         fullArgs[i + 1] = args[i].c_str();
@@ -88,8 +89,8 @@ void ProcessController::start(const std::string & path, const std::vector<std::s
     }
     if (pid == 0) {
         std::string error = "exec " + path;
-
-        execv(fullArgs[0], (char * const *) fullArgs);
+        // TODO : Close all file descriptor
+        execv(fullArgs[0], (char * const *) fullArgs.data());
 
         // Child goes here....
         perror(error.c_str());
@@ -100,6 +101,13 @@ void ProcessController::start(const std::string & path, const std::vector<std::s
 void ProcessController::waitProcessEnd(int exitCode) {
     join();
     expectExitCode(exitCode);
+}
+
+void ProcessController::kill() {
+    if (pid == -1) {
+        return;
+    }
+    ::kill(pid, SIGKILL);
 }
 
 void ProcessController::join() {
@@ -148,8 +156,16 @@ void ProcessController::expectAlive() {
 
 void ProcessController::expectExitCode(int e) {
     expectDone();
+
+    if (!WIFEXITED(status)) {
+        if (WIFSIGNALED(status)) {
+            throw std::runtime_error(cmd + " got signal " + strsignal(WTERMSIG(status)));
+        }
+        // Not sure this is possible at all
+        throw std::runtime_error(cmd + " exited abnormally");
+    }
     int actual = WEXITSTATUS(status);
     if (actual != e) {
-        throw std::runtime_error("Wrong exit code of indiserver: got " + std::to_string(actual) + " - expecting: " + std::to_string(e));
+        throw std::runtime_error("Wrong exit code for " + cmd + ": got " + std::to_string(actual) + " - expecting: " + std::to_string(e));
     }
 }

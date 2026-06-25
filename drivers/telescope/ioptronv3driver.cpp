@@ -34,23 +34,57 @@ namespace IOPv3
 
 const std::map<std::string, std::string> Driver::models =
 {
-    {"0010", "Cube II EQ"},
-    {"0011", "SmartEQ Pro+"},
-    {"0025", "CEM25"},
+    {"0010", "SkyHunter EQ"},
+    {"0011", "SkyHunter AA"},
+    {"0012", "HAE16 EQ"},
+    {"0013", "HAE16 AA"},
+    {"0014", "HAE18 EQ"},
+    {"0015", "HEM15"},
+    {"0022", "HAE18 AA"},
+    {"0025", "HEM27"},
     {"0026", "CEM26"},
     {"0027", "CEM26-EC"},
     {"0028", "GEM28"},
     {"0029", "GEM28-EC"},
-    {"0030", "iEQ30 Pro"},
+    {"0030", "HEM27-EC"},
+    {"0031", "HAE29 EQ"},
+    {"0032", "HAE29-EC AA"},
+    {"0033", "HAE29 AA"},
+    {"0034", "HAE29-EC AA"},
+    {"0035", "HAZ31"},
+    {"0036", "HAE29C EQ"},
+    {"0037", "HAE29C-EC EQ"},
+    {"0038", "HAE29C AA"},
+    {"0039", "HAE29C-EC EQ"},
     {"0040", "CEM40"},
     {"0041", "CEM40-EC"},
     {"0043", "GEM45"},
-    {"0045", "iEQ45 Pro EQ"},
-    {"0046", "iEQ45 Pro AA"},
+    {"0045", "HEM44-EC"},
+    {"0046", "HEM44A"},
+    {"0047", "HEM44A-EC"},
+    {"0048", "HAE43 EQ"},
+    {"0049", "HAE43-EC EQ"},
+    {"0050", "HAE43 AA"},
+    {"0051", "HAE43-EC AA"},
+    {"0052", "HAZ46"},
+    {"0053", "HAE43C EQ"},
+    {"0054", "HAE43C-EC EQ"},
+    {"0055", "HAE43C AA"},
+    {"0056", "HAE43C-EC AA"},
     {"0060", "CEM60"},
     {"0061", "CEM60-EC"},
+    {"0062", "HAE69 EQ"},
+    {"0063", "HAZ69-EC EQ"},
+    {"0064", "HAE69 AA"},
+    {"0065", "HAE69-EC AA"},
+    {"0066", "HAE69C EQ"},
+    {"0067", "HAE69C-EC EQ"},
+    {"0068", "HAE69C AA"},
+    {"0069", "HAE69C-EC AA"},
     {"0070", "CEM70"},
     {"0071", "CEM70-EC"},
+    {"0072", "CEM70-EC2"},
+    {"0073", "HAZ71"},
     {"0120", "CEM120"},
     {"0121", "CEM120-EC"},
     {"0122", "CEM120-EC2"},
@@ -63,7 +97,22 @@ const uint16_t Driver::IOP_SLEW_RATES[] = {1, 2, 8, 16, 64, 128, 256, 512, 1024}
 
 Driver::Driver(const char *deviceName): m_DeviceName(deviceName) {}
 
-bool Driver::sendCommand(const char *command, int count, char *response, uint8_t timeout, uint8_t debugLog)
+bool Driver::sendCommandOk(const char *command)
+{
+    char res[IOP_BUFFER] = {0};
+
+    if (sendCommand(command, 1, res))
+        return res[0] == '1';
+
+    return false;
+}
+
+bool Driver::sendCommand(const char *command,
+                         int count,
+                         char *response,
+                         int minimumCount,
+                         uint8_t timeout,
+                         uint8_t debugLog)
 {
     int errCode = 0;
     int nbytes_read    = 0;
@@ -76,22 +125,29 @@ bool Driver::sendCommand(const char *command, int count, char *response, uint8_t
     if (m_Simulation)
         return true;
 
-    tcflush(PortFD, TCIOFLUSH);
-
-    if ((errCode = tty_write(PortFD, command, strlen(command), &nbytes_written)) != TTY_OK)
+    // Try to dispatch command and read twice in case of timeouts.
+    for (int i = 0; i < 2; i++)
     {
-        tty_error_msg(errCode, errMsg, MAXRBUF);
-        DEBUGFDEVICE(m_DeviceName, INDI::Logger::DBG_ERROR, "Write Command Error: %s", errMsg);
-        return false;
+        tcflush(PortFD, TCIOFLUSH);
+
+        if ((errCode = tty_write(PortFD, command, strlen(command), &nbytes_written)) != TTY_OK)
+        {
+            tty_error_msg(errCode, errMsg, MAXRBUF);
+            DEBUGFDEVICE(m_DeviceName, INDI::Logger::DBG_ERROR, "Write Command Error: %s", errMsg);
+            return false;
+        }
+
+        if (count == 0)
+            return true;
+
+        if (count == -1)
+            errCode = tty_read_section(PortFD, res, '#', timeout, &nbytes_read);
+        else
+            errCode = tty_read(PortFD, res, count, timeout, &nbytes_read);
+
+        if (errCode == TTY_OK && (minimumCount < 0 || minimumCount <= count))
+            break;
     }
-
-    if (count == 0)
-        return true;
-
-    if (count == -1)
-        errCode = tty_read_section(PortFD, res, '#', timeout, &nbytes_read);
-    else
-        errCode = tty_read(PortFD, res, count, timeout, &nbytes_read);
 
     if (errCode != TTY_OK)
     {
@@ -110,12 +166,9 @@ bool Driver::sendCommand(const char *command, int count, char *response, uint8_t
 
     // Copy response to buffer
     if (response)
-        strncpy(response, res, IOP_BUFFER);
+        snprintf(response, IOP_BUFFER, "%s", res);
 
-    if (count == -1 || (count == 1 && res[0] == '1') || count == nbytes_read)
-        return true;
-
-    return false;
+    return true;
 }
 
 bool Driver::checkConnection(int fd)
@@ -132,7 +185,7 @@ bool Driver::checkConnection(int fd)
 
     for (int i = 0; i < 2; i++)
     {
-        if (sendCommand(":MountInfo#", 4, res, 3) == false)
+        if (sendCommand(":MountInfo#", 4, res, -1, 3) == false)
         {
             usleep(50000);
             continue;
@@ -142,6 +195,7 @@ bool Driver::checkConnection(int fd)
     }
 
     return false;
+    DEBUGDEVICE(m_DeviceName, INDI::Logger::DBG_DEBUG, res);
 }
 
 void Driver::setDebug(bool enable)
@@ -236,13 +290,20 @@ bool Driver::getStatus(IOPInfo *info)
                  iopLongitude, iopLatitude, simData.simInfo.gpsStatus, simData.simInfo.systemStatus, simData.simInfo.trackRate,
                  simData.simInfo.slewRate, simData.simInfo.timeSource, simData.simInfo.hemisphere);
     }
-    else if (sendCommand(":GLS#", -1, res) == false)
+    else if (sendCommand(":GLS#", -1, res, 23) == false)
         return false;
 
 
+    if (strlen(res) != 23)
+    {
+        DEBUGFDEVICE(m_DeviceName, INDI::Logger::DBG_ERROR, "%s: Expected 23 bytes but received %d.", __PRETTY_FUNCTION__,
+                     strlen(res));
+        return false;
+    }
+
     char longPart[16] = {0}, latPart[16] = {0};
-    strncpy(longPart, res, 9);
-    strncpy(latPart, res + 9, 8);
+    snprintf(longPart, sizeof(longPart), "%.9s", res);
+    snprintf(latPart, sizeof(latPart), "%.8s", res + 9);
 
     int arcsecLongitude = atoi(longPart);
     int arcsecLatitude  = atoi(latPart);
@@ -297,8 +358,8 @@ bool Driver::getMainFirmware(std::string &mainFirmware, std::string &controllerF
         return false;
 
     char mStr[16] = {0}, cStr[16] = {0};
-    strncpy(mStr, res, 6);
-    strncpy(cStr, res + 6, 6);
+    snprintf(mStr, sizeof(mStr), "%.6s", res);
+    snprintf(cStr, sizeof(cStr), "%.6s", res + 6);
 
     mainFirmware = mStr;
     controllerFirmware = cStr;
@@ -316,8 +377,8 @@ bool Driver::getRADEFirmware(std::string &RAFirmware, std::string &DEFirmware)
         return false;
 
     char mStr[16] = {0}, cStr[16] = {0};
-    strncpy(mStr, res, 6);
-    strncpy(cStr, res + 6, 6);
+    snprintf(mStr, sizeof(mStr), "%.6s", res);
+    snprintf(cStr, sizeof(cStr), "%.6s", res + 6);
 
     RAFirmware = mStr;
     DEFirmware = cStr;
@@ -352,11 +413,11 @@ bool Driver::stopMotion(IOP_DIRECTION dir)
     {
         case IOP_N:
         case IOP_S:
-            return sendCommand(":qD#");
+            return sendCommandOk(":qD#");
 
         case IOP_W:
         case IOP_E:
-            return sendCommand(":qR#");
+            return sendCommandOk(":qR#");
     }
 
     return false;
@@ -364,28 +425,29 @@ bool Driver::stopMotion(IOP_DIRECTION dir)
 
 bool Driver::findHome()
 {
-    return sendCommand(":MSH#");
+    return sendCommandOk(":MSH#");
 }
 
 bool Driver::gotoHome()
 {
-    return sendCommand(":MH#");
+    return sendCommandOk(":MH#");
 }
 
 bool Driver::setCurrentHome()
 {
-    return sendCommand(":SZP#");
+    return sendCommandOk(":SZP#");
 }
 
 /* v3.0 Added in control for PEC , Train and Data Integrity */
 bool Driver::setPECEnabled(bool enabled)
 {
+    // JM 2024.10.11: Changed to direct command without waiting for response.
     return sendCommand(enabled ? ":SPP1#" : ":SPP0#");
 }
 
 bool Driver::setPETEnabled(bool enabled)
 {
-    return sendCommand(enabled ? ":SPR1#" : ":SPR0#");
+    return sendCommandOk(enabled ? ":SPR1#" : ":SPR0#");
 }
 
 bool Driver::getPETEnabled(bool enabled)
@@ -424,7 +486,7 @@ bool Driver::setSlewRate(IOP_SLEW_RATE rate)
 
     simData.simInfo.slewRate = rate;
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setTrackMode(IOP_TRACK_RATE rate)
@@ -434,15 +496,15 @@ bool Driver::setTrackMode(IOP_TRACK_RATE rate)
     switch (rate)
     {
         case TR_SIDEREAL:
-            return sendCommand(":RT0#");
+            return sendCommandOk(":RT0#");
         case TR_LUNAR:
-            return sendCommand(":RT1#");
+            return sendCommandOk(":RT1#");
         case TR_SOLAR:
-            return sendCommand(":RT2#");
+            return sendCommandOk(":RT2#");
         case TR_KING:
-            return sendCommand(":RT3#");
+            return sendCommandOk(":RT3#");
         case TR_CUSTOM:
-            return sendCommand(":RT4#");
+            return sendCommandOk(":RT4#");
     }
 
     return false;
@@ -456,7 +518,7 @@ bool Driver::setCustomRATrackRate(double rate)
     char cmd[IOP_BUFFER] = {0};
     snprintf(cmd, IOP_BUFFER, ":RR%05u#", static_cast<uint32_t>(rate * 10000));
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setGuideRate(double RARate, double DERate)
@@ -467,7 +529,7 @@ bool Driver::setGuideRate(double RARate, double DERate)
     char cmd[IOP_BUFFER] = {0};
     snprintf(cmd, IOP_BUFFER, ":RG%02u%02u#", static_cast<uint32_t>(RARate * 100), static_cast<uint32_t>(DERate * 100));
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::getGuideRate(double *RARate, double *DERate)
@@ -481,8 +543,8 @@ bool Driver::getGuideRate(double *RARate, double *DERate)
         return false;
 
     char raStr[8] = {0}, deStr[8] = {0};
-    strncpy(raStr, res, 2);
-    strncpy(deStr, res + 2, 2);
+    snprintf(raStr, sizeof(raStr), "%.2s", res);
+    snprintf(deStr, sizeof(deStr), "%.2s", res + 2);
 
     *RARate = atoi(raStr) / 100.0;
     *DERate = atoi(deStr) / 100.0;
@@ -495,36 +557,37 @@ bool Driver::startGuide(IOP_DIRECTION dir, uint32_t ms)
     char cmd[IOP_BUFFER] = {0};
     char dir_c = 0;
 
-    // Sophie Taylor 2022-03-01
-    // TODO: This command set is deprecated, to be replaced with RA+/- and Dec+/- commands
-    // See https://www.ioptron.com/v/ASCOM/RS-232_Command_Language2014V310.pdf
     switch (dir)
     {
+        // Dec+
         case IOP_N:
-            dir_c = 'n';
+            dir_c = 'E';
             break;
 
+        // Dec-
         case IOP_S:
-            dir_c = 's';
+            dir_c = 'C';
             break;
 
+        // RA-
         case IOP_W:
-            dir_c = 'w';
+            dir_c = 'Q';
             break;
 
+        // RA+
         case IOP_E:
-            dir_c = 'e';
+            dir_c = 'S';
             break;
     }
 
-    snprintf(cmd, IOP_BUFFER, ":M%c%05u#", dir_c, ms);
+    snprintf(cmd, IOP_BUFFER, ":Z%c%05u#", dir_c, ms);
 
     return sendCommand(cmd, 0);
 }
 
 bool Driver::park()
 {
-    return sendCommand(":MP1#");
+    return sendCommandOk(":MP1#");
 }
 
 bool Driver::unpark()
@@ -532,7 +595,7 @@ bool Driver::unpark()
     //NB: This command only available in CEM120 series, CEM60 series, iEQ45 Pro, iEQ45 Pro
     //AA and iEQ30 Pro.
     setSimSytemStatus(ST_STOPPED);
-    return sendCommand(":MP0#");
+    return sendCommandOk(":MP0#");
 }
 
 bool Driver::setParkAz(double az)
@@ -544,7 +607,7 @@ bool Driver::setParkAz(double az)
 
     snprintf(cmd, IOP_BUFFER, ":SPA%09d#", ieqValue);
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setParkAlt(double alt)
@@ -556,7 +619,7 @@ bool Driver::setParkAlt(double alt)
     // Send as 0.01 arcsec resolution
     int ieqValue = static_cast<int>(alt * 60 * 60 * 100);
     snprintf(cmd, IOP_BUFFER, ":SPH%08d#", ieqValue);
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::abort()
@@ -564,7 +627,7 @@ bool Driver::abort()
     if (simData.simInfo.systemStatus == ST_SLEWING)
         simData.simInfo.systemStatus =  simData.simInfo.rememberSystemStatus;
 
-    return sendCommand(":Q#");
+    return sendCommandOk(":Q#");
 }
 
 bool Driver::slewNormal()
@@ -572,7 +635,7 @@ bool Driver::slewNormal()
     simData.simInfo.rememberSystemStatus = simData.simInfo.systemStatus;
     simData.simInfo.systemStatus = ST_SLEWING;
 
-    return sendCommand(":MS1#");
+    return sendCommandOk(":MS1#");
 }
 
 bool Driver::slewCWUp()
@@ -580,12 +643,12 @@ bool Driver::slewCWUp()
     simData.simInfo.rememberSystemStatus = simData.simInfo.systemStatus;
     simData.simInfo.systemStatus = ST_SLEWING;
 
-    return sendCommand(":MS2#");
+    return sendCommandOk(":MS2#");
 }
 
 bool Driver::sync()
 {
-    return sendCommand(":CM#");
+    return sendCommand(":CM#", 1);
 }
 
 bool Driver::setTrackEnabled(bool enabled)
@@ -608,7 +671,7 @@ bool Driver::setRA(double ra)
     char cmd[IOP_BUFFER] = {0};
     snprintf(cmd, IOP_BUFFER, ":SRA%09u#", casRA);
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setDE(double de)
@@ -622,7 +685,7 @@ bool Driver::setDE(double de)
     char cmd[IOP_BUFFER] = {0};
     snprintf(cmd, IOP_BUFFER, ":Sd%c%08u#", de >= 0 ? '+' : '-', casDE);
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setLongitude(double longitude)
@@ -634,7 +697,7 @@ bool Driver::setLongitude(double longitude)
     char cmd[IOP_BUFFER] = {0};
     snprintf(cmd, IOP_BUFFER, ":SLO%c%08u#", longitude >= 0 ? '+' : '-', casLongitude);
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setLatitude(double latitude)
@@ -646,7 +709,7 @@ bool Driver::setLatitude(double latitude)
     char cmd[IOP_BUFFER] = {0};
     snprintf(cmd, IOP_BUFFER, ":SLA%c%08u#", latitude >= 0 ? '+' : '-', casLatitude);
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setUTCDateTime(double JD)
@@ -658,7 +721,7 @@ bool Driver::setUTCDateTime(double JD)
 
     simData.JD = JD;
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setUTCOffset(int offsetMinutes)
@@ -668,7 +731,7 @@ bool Driver::setUTCOffset(int offsetMinutes)
 
     simData.utc_offset_minutes = offsetMinutes;
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::setDaylightSaving(bool enabled)
@@ -678,7 +741,7 @@ bool Driver::setDaylightSaving(bool enabled)
 
     simData.day_light_saving = enabled;
 
-    return sendCommand(cmd);
+    return sendCommandOk(cmd);
 }
 
 bool Driver::getCoords(double *ra, double *de, IOP_PIER_STATE *pierState, IOP_CW_STATE *cwState)
@@ -690,13 +753,20 @@ bool Driver::getCoords(double *ra, double *de, IOP_PIER_STATE *pierState, IOP_CW
                  static_cast<uint32_t>(fabs(simData.de) * 60 * 60 * 100),
                  static_cast<uint32_t>(simData.ra * 15 * 60 * 60 * 100), simData.pier_state, simData.cw_state);
     }
-    else if (sendCommand(":GEP#", -1, res, IOP_TIMEOUT, INDI::Logger::DBG_EXTRA_1) == false)
+    else if (sendCommand(":GEP#", -1, res, 20, IOP_TIMEOUT, INDI::Logger::DBG_EXTRA_1) == false)
         return false;
+
+    if (strlen(res) != 20)
+    {
+        DEBUGFDEVICE(m_DeviceName, INDI::Logger::DBG_ERROR, "%s: Expected 20 bytes but received %d.", __PRETTY_FUNCTION__,
+                     strlen(res));
+        return false;
+    }
 
     char deStr[16] = {0}, raStr[16] = {0};
 
     strncpy(deStr, res, 9);
-    strncpy(raStr, res + 9, 9);
+    snprintf(raStr, sizeof(raStr), "%.9s", res + 9);
 
     try
     {
@@ -724,13 +794,20 @@ bool Driver::getUTCDateTime(double *JD, int *utcOffsetMinutes, bool *dayLightSav
                  abs(simData.utc_offset_minutes),
                  (simData.day_light_saving ? '1' : '0'), static_cast<uint64_t>((simData.JD - J2000) * 8.64e+7));
     }
-    else if (sendCommand(":GUT#", -1, res) == false)
+    else if (sendCommand(":GUT#", -1, res, 18) == false)
         return false;
+
+    if (strlen(res) != 18)
+    {
+        DEBUGFDEVICE(m_DeviceName, INDI::Logger::DBG_ERROR, "%s: Expected 18 bytes but received %d.", __PRETTY_FUNCTION__,
+                     strlen(res));
+        return false;
+    }
 
     char offsetStr[16] = {0}, JDStr[16] = {0};
 
     strncpy(offsetStr, res, 4);
-    strncpy(JDStr, res + 5, 13);
+    snprintf(JDStr, sizeof(JDStr), "%.13s", res + 5);
 
     *utcOffsetMinutes = atoi(offsetStr);
     *dayLightSaving   = (res[4] == '1');
@@ -784,7 +861,7 @@ bool Driver::setMeridianBehavior(IOP_MB_STATE action, uint8_t degrees)
     {
         char cmd[IOP_BUFFER] = {0};
         snprintf(cmd, IOP_BUFFER, ":SMT%d%02d#", action, degrees);
-        return sendCommand(cmd);
+        return sendCommandOk(cmd);
     }
 }
 

@@ -24,6 +24,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace Connection
 {
@@ -45,7 +46,7 @@ class Serial : public Interface
          */
         typedef enum { B_9600, B_19200, B_38400, B_57600, B_115200, B_230400 } BaudRate;
 
-        Serial(INDI::DefaultDevice *dev);
+        Serial(INDI::DefaultDevice *dev, IPerm permission = IP_RW);
         virtual ~Serial();
 
         virtual bool Connect() override;
@@ -92,6 +93,23 @@ class Serial : public Interface
          * @param newRate Desired new rate
          */
         void setDefaultBaudRate(BaudRate newRate);
+
+        /**
+         * @brief setPortMatchPattern Set a regex pattern used to automatically select a serial port
+         * from the discovered system ports. When the system ports are scanned, if any port path
+         * matches this pattern AND no previously-saved config port is available, the first matching
+         * port is automatically selected as the active port.
+         *
+         * This is particularly useful for devices whose USB serial paths embed the device name
+         * (e.g. Pegasus Astro devices under /dev/serial/by-id/), allowing the correct port to be
+         * selected without blind handshake attempts against every port.
+         *
+         * Call this function in initProperties() of your driver. The matching is case-insensitive.
+         * If the pattern is empty (the default), no auto-selection is performed.
+         *
+         * @param pattern Case-insensitive regex pattern (e.g. "FocusCube", "FlatMaster", "Falcon")
+         */
+        void setPortMatchPattern(const std::string &pattern);
 
         /**
          * @return Return port file descriptor. If connection is successful, PortFD is a positive
@@ -191,8 +209,12 @@ class Serial : public Interface
         uint8_t parity = 0;
         uint8_t stopBits = 1;
 
+        IPerm m_Permission = IP_RW;
+
         std::string m_ConfigPort;
         int m_ConfigBaudRate {-1};
         std::vector<std::string> m_SystemPorts;
+        // Optional regex pattern for auto-selecting a port by device name (e.g. Pegasus devices)
+        std::string m_PortMatchPattern;
 };
 }

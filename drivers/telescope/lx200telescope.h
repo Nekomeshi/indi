@@ -121,7 +121,7 @@ class LX200Telescope : public INDI::Telescope, public INDI::GuiderInterface, pub
         // Initial function to get data after connection is successful
         virtual void getBasicData();
 
-        // Get local calender date (NOT UTC) from mount. Expected format is YYYY-MM-DD
+        // Get local calendar date (NOT UTC) from mount. Expected format is YYYY-MM-DD
         virtual bool getLocalDate(char *dateString);
         virtual bool setLocalDate(uint8_t days, uint8_t months, uint16_t years);
 
@@ -189,7 +189,7 @@ class LX200Telescope : public INDI::Telescope, public INDI::GuiderInterface, pub
         /* Use pulse-guide commands */
         ISwitchVectorProperty UsePulseCmdSP;
         ISwitch UsePulseCmdS[2];
-        bool usePulseCommand { false };
+        bool usePulseCommand { true };
 
         /* Site Management */
         ISwitchVectorProperty SiteSP;
